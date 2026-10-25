@@ -1,13 +1,14 @@
 import uuid
 
 from langchain.agents import create_agent
+from langgraph.store.memory import InMemoryStore
 from langgraph.checkpoint.memory import InMemorySaver
 
-from pydantic_models.concept_explaination import ConceptExplaination
+from tools.preferences import save_preference, get_preference
 from utils import constants
 import streamlit as st
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 st.set_page_config(
@@ -24,9 +25,12 @@ def get_agent():
                         api_key=constants.OPENAI_API_KEY)
 
     checkpointer = InMemorySaver()
+    store = InMemoryStore()
     return create_agent(model=model,
-                         system_prompt=constants.SYSTEM_PROMPT,
-                         checkpointer=checkpointer)
+                        tools=[save_preference, get_preference],
+                        system_prompt=constants.SYSTEM_PROMPT,
+                        checkpointer=checkpointer,
+                        store=store)
 
 agent = get_agent()
 
@@ -42,6 +46,12 @@ if "messages" not in st.session_state:
 
 if "thread_id" not in st.session_state:
     st.session_state["thread_id"] = str(uuid.uuid4())
+
+# Start a fresh conversation when requested.
+if st.button("➕ New chat"):
+    st.session_state["messages"] = []
+    st.session_state["thread_id"] = str(uuid.uuid4())
+    st.rerun()
 
 for message in st.session_state["messages"]:
     with st.chat_message(message["role"]):
