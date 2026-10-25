@@ -1,5 +1,6 @@
 import os
 
+APP_NAME = "ai_eng_asst"
 USER_ID = "uday_local_user"
 GPT_4_MINI = "gpt-4o-mini"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
