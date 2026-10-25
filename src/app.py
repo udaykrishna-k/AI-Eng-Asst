@@ -11,6 +11,8 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from utils.stream import stream_answer
+
 st.set_page_config(
     page_title="AI Engineering Assistant",
     page_icon="🤖",
@@ -63,21 +65,11 @@ if user_input := st.chat_input("Ask me anything..."):
 
     st.session_state["messages"].append({"role": "user", "content": user_input})
 
-    # conversation = []
-    # for message in st.session_state["messages"]:
-    #     if message["role"] == "assistant":
-    #         conversation.append(AIMessage(content=message["content"]))
-    #     elif message["role"] == "user":
-    #         conversation.append(HumanMessage(content=message["content"]))
-
     try:
         config = {"configurable": {"thread_id": st.session_state.thread_id}}
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = agent.invoke({"messages": [HumanMessage(content=user_input)]},
-                                        config=config)
-            answer = response["messages"][-1].content
-            st.markdown(answer)
+                answer = st.write_stream(stream_answer(agent, user_input, config))
 
         st.session_state["messages"].append({"role": "assistant", "content": answer})
 
