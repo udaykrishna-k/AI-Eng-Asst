@@ -1,4 +1,8 @@
+import uuid
+
 from langchain.agents import create_agent
+from langgraph.checkpoint.memory import InMemorySaver
+
 from pydantic_models.concept_explaination import ConceptExplaination
 from utils import constants
 import streamlit as st
@@ -19,10 +23,10 @@ def get_agent():
                         temperature=0,
                         api_key=constants.OPENAI_API_KEY)
 
-    agent = create_agent(model=model,
-                         system_prompt=constants.SYSTEM_PROMPT)
-
-    return agent
+    checkpointer = InMemorySaver()
+    return create_agent(model=model,
+                         system_prompt=constants.SYSTEM_PROMPT,
+                         checkpointer=checkpointer)
 
 agent = get_agent()
 
@@ -36,6 +40,9 @@ prompt_template = ChatPromptTemplate.from_messages([
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
 
+if "thread_id" not in st.session_state:
+    st.session_state["thread_id"] = str(uuid.uuid4())
+
 for message in st.session_state["messages"]:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -46,17 +53,19 @@ if user_input := st.chat_input("Ask me anything..."):
 
     st.session_state["messages"].append({"role": "user", "content": user_input})
 
-    conversation = []
-    for message in st.session_state["messages"]:
-        if message["role"] == "assistant":
-            conversation.append(AIMessage(content=message["content"]))
-        elif message["role"] == "user":
-            conversation.append(HumanMessage(content=message["content"]))
+    # conversation = []
+    # for message in st.session_state["messages"]:
+    #     if message["role"] == "assistant":
+    #         conversation.append(AIMessage(content=message["content"]))
+    #     elif message["role"] == "user":
+    #         conversation.append(HumanMessage(content=message["content"]))
 
     try:
+        config = {"configurable": {"thread_id": st.session_state.thread_id}}
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = agent.invoke({"messages": conversation})
+                response = agent.invoke({"messages": [HumanMessage(content=user_input)]},
+                                        config=config)
             answer = response["messages"][-1].content
             st.markdown(answer)
 
