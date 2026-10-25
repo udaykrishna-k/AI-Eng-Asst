@@ -1,3 +1,4 @@
+from langchain.agents import create_agent
 from pydantic_models.concept_explaination import ConceptExplaination
 from utils import constants
 import streamlit as st
@@ -13,13 +14,17 @@ st.title("AI Engineering Assistant")
 st.caption("Built with LangChain and Streamlit")
 
 @st.cache_resource
-def get_model():
-    return init_chat_model(model=constants.GPT_4_MINI,
+def get_agent():
+    model = init_chat_model(model=constants.GPT_4_MINI,
                         temperature=0,
                         api_key=constants.OPENAI_API_KEY)
 
-model = get_model()
-structured_model = model.with_structured_output(ConceptExplaination)
+    agent = create_agent(model=model,
+                         system_prompt=constants.SYSTEM_PROMPT)
+
+    return agent
+
+agent = get_agent()
 
 prompt_template = ChatPromptTemplate.from_messages([
     ("system", constants.SYSTEM_PROMPT),
@@ -27,8 +32,6 @@ prompt_template = ChatPromptTemplate.from_messages([
     ("user", "{input}")
 ])
 
-
-chain = prompt_template | structured_model
 
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
@@ -43,8 +46,7 @@ if user_input := st.chat_input("Ask me anything..."):
 
     st.session_state["messages"].append({"role": "user", "content": user_input})
 
-    conversation = [SystemMessage(content=constants.SYSTEM_PROMPT)]
-
+    conversation = []
     for message in st.session_state["messages"]:
         if message["role"] == "assistant":
             conversation.append(AIMessage(content=message["content"]))
@@ -54,20 +56,11 @@ if user_input := st.chat_input("Ask me anything..."):
     try:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
+                response = agent.invoke({"messages": conversation})
+            answer = response["messages"][-1].content
+            st.markdown(answer)
 
-                result = chain.invoke({"history": conversation,
-                                         "input": user_input})
-
-            st.subheader(result.concept)
-            st.write(result.explanation)
-
-            st.caption(f"Difficulty: {result.difficulty}")
-
-            st.write("Related topics:")
-            for topic in result.related_topics:
-                st.write(f"- {topic}")
-
-        st.session_state["messages"].append({"role": "assistant", "content": result})
+        st.session_state["messages"].append({"role": "assistant", "content": answer})
 
     except Exception as e:
         st.error(f"Something went wrong: {e}")
