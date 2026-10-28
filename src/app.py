@@ -1,5 +1,3 @@
-import uuid
-import sqlite3
 from pathlib import Path
 import logging
 
@@ -8,18 +6,18 @@ from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langgraph.store.sqlite import SqliteStore
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.checkpoint.memory import InMemorySaver
 
 from tools.preferences import save_preference, get_preference
 from utils import constants
+from utils.conversation_history import load_thread_messages
 from utils.logging_config import setup_logger
 from utils.stream import stream_answer
-
+from utils.chat_registry import initialize_chat_registry, get_connection, get_all_chats, create_chat, update_chat
 
 # Configure console logging before creating the agent.
 setup_logger()
 log = logging.getLogger(constants.APP_NAME)
-
+initialize_chat_registry()
 
 st.set_page_config(
     page_title="AI Engineering Assistant",
@@ -50,20 +48,17 @@ def get_agent():
         db_path = Path(__file__).parent / "assistant_memory.sqlite"
         log.debug("Initializing SQLite preference store")
 
-        conn = sqlite3.connect(
-            str(db_path),
-            check_same_thread=False,
-            isolation_level=None,
-        )
+        checkpoint_conn = get_connection()
 
-        log.debug("Initializing in-memory checkpointer")
-        checkpointer = SqliteSaver(conn)
+        store_conn = get_connection()
+
+        checkpointer = SqliteSaver(checkpoint_conn)
         checkpointer.setup()
 
-        store = SqliteStore(conn)
+        store = SqliteStore(store_conn)
         store.setup()
 
-        log.info("SQLite preference store initialized successfully")
+        log.info("SQLite checkpointer and preference store initialized")
 
         agent = create_agent(
             model=model,
@@ -87,41 +82,56 @@ except Exception:
     st.error("The assistant could not be initialized. Please check the application logs.")
     st.stop()
 
-
-# Initialize Streamlit session state.
-if "messages" not in st.session_state:
-    st.session_state["messages"] = []
-    log.debug("Initialized chat message history")
+chats = get_all_chats()
 
 if "thread_id" not in st.session_state:
-    st.session_state["thread_id"] = str(uuid.uuid4())
-    log.debug("Created a new conversation thread")
+    if chats:
+        log.debug("Using the latest conversation thread")
+        st.session_state["thread_id"] = chats[0]["chat_id"]
+    else:
+        log.debug("Created a new conversation thread")
+        st.session_state["thread_id"] = create_chat()
 
+# Sidebar: create and switch conversations.
+with st.sidebar:
+    st.title("Chat history")
 
-# Start a fresh conversation when requested.
-if st.button("➕ New chat"):
-    st.session_state["messages"] = []
-    st.session_state["thread_id"] = str(uuid.uuid4())
+    if st.button("➕ New chat", use_container_width=True):
+        st.session_state["thread_id"] = create_chat()
+        log.info("Switched to a new conversation")
+        st.rerun()
 
-    log.info("Started a new conversation thread")
+    st.divider()
 
-    st.rerun()
+    chats = get_all_chats()
 
+    for chat in chats:
+        title, chat_id = chat["title"], chat["chat_id"]
+        if st.button(
+            f"💬 {title}",
+            key=f"chat_{chat_id}",
+            use_container_width=True,
+        ):
+            if chat_id != st.session_state["thread_id"]:
+                st.session_state["thread_id"] = chat_id
+                log.info("Switched conversation")
+                log.debug("Active thread_id=%s", chat_id)
+                st.rerun()
+
+thread_id = st.session_state["thread_id"]
+messages = load_thread_messages(agent, thread_id)
 
 # Display existing conversation history.
-for message in st.session_state["messages"]:
+for message in messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-
 
 # Process a new user message.
 if user_input := st.chat_input("Ask me anything..."):
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    st.session_state["messages"].append(
-        {"role": "user", "content": user_input}
-    )
+    update_chat(thread_id, str(user_input))
 
     thread_id = st.session_state["thread_id"]
 
@@ -146,10 +156,6 @@ if user_input := st.chat_input("Ask me anything..."):
                 answer = st.write_stream(
                     stream_answer(agent, user_input, config)
                 )
-
-        st.session_state["messages"].append(
-            {"role": "assistant", "content": answer}
-        )
 
         log.info("Agent request completed successfully")
 
